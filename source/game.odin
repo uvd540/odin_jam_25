@@ -1,7 +1,7 @@
 package game
 
 import rl "vendor:raylib"
-// import "core:log"
+import "core:log"
 // import "core:fmt"
 import "core:c"
 import "core:math/rand"
@@ -30,11 +30,14 @@ config_alignment  := false
 config_cohesion   := false
 config_protected_distance : f32 = 10.0
 config_visible_distance   : f32 = 25.0
-config_separation_factor  : f32 = 0.01
+config_separation_factor  : f32 = 0.1
 config_alignment_factor   : f32 = 0.01
 config_cohesion_factor    : f32 = 0.01
 config_mouse_tracking_factor :f32 = 0.1
+config_drag_factor        : f32 = 0.1
 // -- config --
+
+debug_mode := true
 
 // -- level --
 start_location :: rl.Rectangle{100, 100, 50, 50}
@@ -67,7 +70,7 @@ update :: proc() {
 	rl.BeginDrawing()
 	rl.ClearBackground({0, 120, 153, 255})
 	rl.DrawFPS(0, 0)
-	rl.BeginMode2D(camera)
+	// rl.BeginMode2D(camera)
 	{
 		rl.DrawRectangleRec(start_location, rl.DARKGRAY)
 		// TODO performance: Consider using &bird
@@ -76,10 +79,13 @@ update :: proc() {
 			bird_dest_rect.y = bird.position.y
 			rl.DrawTexturePro(bird_texture, bird_src_rect, bird_dest_rect, {8, 8}, 0, rl.WHITE)
 		}
-		rl.DrawCircleV(birds[0].position, config_protected_distance, {128, 128, 0, 128})
-		rl.DrawCircleV(birds[0].position, config_visible_distance, {0, 128, 128, 128})
+		if debug_mode {
+			rl.DrawCircleV(birds[0].position, config_protected_distance, {128, 128, 0, 128})
+			rl.DrawCircleV(birds[0].position, config_visible_distance, {0, 128, 128, 128})
+			log.info(birds[0].delta_velocity)
+		}
 	}
-	rl.EndMode2D()
+	// rl.EndMode2D()
 	rl.EndDrawing()
 
 	// Anything allocated using temp allocator is invalid after this.
@@ -92,6 +98,7 @@ birds_update :: proc(dt: f32) {
 		separation_velocity: [2]f32
 		alignment_velocity: [2]f32
 		cohesion_velocity: [2]f32
+		mouse_tracking_velocity: [2]f32
 		for j in 0..<num_birds {
 			if i == j { continue } // same bird
 			distance := linalg.distance(birds[i].position, birds[j].position)
@@ -101,11 +108,22 @@ birds_update :: proc(dt: f32) {
 			}
 		}
 		// mouse tracking
-		
-		birds[i].delta_velocity = separation_velocity + alignment_velocity + cohesion_velocity
+		mouse_position := rl.GetMousePosition()
+		distance_to_mouse := linalg.distance(birds[i].position, mouse_position)
+		log.info(distance_to_mouse)
+		if distance_to_mouse <= config_visible_distance {
+			log.info("tracking mouse")
+			mouse_tracking_velocity = (mouse_position - birds[i].position) / distance_to_mouse * config_mouse_tracking_factor
+		}
+		birds[i].delta_velocity = separation_velocity + alignment_velocity + cohesion_velocity + mouse_tracking_velocity
 	}
 	for &bird in birds {
-		bird.velocity += bird.delta_velocity
+		if bird.delta_velocity == {0, 0} {
+			// drag
+			bird.velocity = rl.Vector2MoveTowards(bird.velocity, {0, 0}, config_drag_factor)
+		} else {
+			bird.velocity += bird.delta_velocity
+		}
 		bird.position += bird.velocity * dt
 	}
 }
