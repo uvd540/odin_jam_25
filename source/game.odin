@@ -1,8 +1,8 @@
 package game
 
 //
-// TODO: Implement birds reaching to target
-// TODO: Multiple targets
+// TODO: Obstacles
+// TODO: Level complete
 // TODO: Give name to each bird
 // TODO: Multiple levels
 // TODO: Rendering improvements
@@ -58,6 +58,7 @@ Target :: struct {
 	location:        rl.Rectangle,
 	number_required: u8,
 	number_current:  u8,
+	pct_complete:    f32,
 }
 
 // :level
@@ -136,7 +137,10 @@ update :: proc() {
 	rl.DrawFPS(0, 0)
 	rl.DrawRectangleRec(active_level.start_location, rl.DARKGRAY)
 	for target in active_level.targets {
-		rl.DrawRectangleRec(target.location, rl.DARKGREEN)
+		color_g := u8(target.pct_complete * 255)
+		color_r := u8((1 - target.pct_complete) * 128)
+		rl.DrawRectangleRec(target.location, {color_r, color_g, color_r, 255})
+		rl.DrawText(fmt.ctprintf("%d", target.number_required - target.number_current), i32(target.location.x) + 4, i32(target.location.y) + 4, 32, rl.WHITE)
 	}
 	#partial switch game_mode {
 		case .PLAY: {
@@ -233,9 +237,7 @@ game_update :: proc(dt: f32) {
 		// add velocity components
 		birds[i].delta_velocity = separation_velocity + alignment_velocity + cohesion_velocity + mouse_tracking_velocity
 	}
-	// birds_to_remove := make([dynamic]int, context.temp_allocator)
 	for i := 0; i < len(birds); {
-	// for &bird, i in birds {
 		if birds[i].delta_velocity == {0, 0} {
 			// drag
 			birds[i].velocity = rl.Vector2MoveTowards(birds[i].velocity, {0, 0}, config_drag_factor)
@@ -250,9 +252,13 @@ game_update :: proc(dt: f32) {
 		birds[i].position += birds[i].velocity * dt
 		// check if birds[i] at target
 		remove := false
-		for target in active_level.targets {
-			if rl.CheckCollisionPointRec(birds[i].position, target.location) {
-				remove = true
+		for &target in active_level.targets {
+			if target.pct_complete < 1 {
+				if rl.CheckCollisionPointRec(birds[i].position, target.location) {
+					target.number_current += 1
+					remove = true
+					target.pct_complete = f32(target.number_current) / f32(target.number_required)
+				}
 			}
 		}
 		if remove {
