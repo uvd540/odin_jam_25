@@ -1,8 +1,16 @@
 package game
 
+//
+// TODO: Implement birds reaching to target
+// TODO: Multiple targets
+// TODO: Give name to each bird
+// TODO: Multiple levels
+// TODO: Rendering improvements
+// 
+
 import rl "vendor:raylib"
-// import "core:log"
-// import "core:fmt"
+import "core:log"
+import "core:fmt"
 import "core:c"
 import "core:math/rand"
 import "core:math/linalg"
@@ -46,10 +54,31 @@ config_drag_factor           : f32 = 0.1
 
 debug_mode := true
 
+Target :: struct {
+	location:        rl.Rectangle,
+	number_required: u8,
+	number_current:  u8,
+}
+
 // :level
-start_location :: rl.Rectangle {100, 100, 50, 50}
-end_location   :: rl.Rectangle {900, 500, 50, 50}
-level_polygon  :  [dynamic][2]f32
+Level :: struct {
+	start_location : rl.Rectangle,
+	targets        : []Target,
+	polygon        : [][2]f32,
+}
+
+active_level : ^Level
+
+level_1 := Level {
+	start_location = rl.Rectangle {100, 100, 50, 50},
+	targets = []Target{
+		{location=rl.Rectangle{500, 500, 50, 50}, number_required=20},
+		{location=rl.Rectangle{600, 100, 50, 50}, number_required=20},
+	},
+	polygon = {{87, 86}, {165, 84}, {242, 78}, {341, 103}, {445, 101}, {508, 83}, {578, 101}, {597, 95}, {621, 95}, {655, 90}, {665, 116}, {662, 139}, {652, 169}, {615, 181}, {592, 242}, {575, 296}, {591, 552}, {479, 574}, {342, 363}, {279, 287}, {239, 235}, {123, 215}, {92, 166}},
+}
+
+editor_level_polygon  :  [dynamic][2]f32
 selected_node_index : int = -1
 node_radius    :: 5
 
@@ -58,19 +87,26 @@ init :: proc() {
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
 	rl.InitWindow(1280, 720, "Bird Pathways")
 
+	log.info("loading textures...")
+
 	// Anything in `assets` folder is available to load.
 	bird_texture = rl.LoadTexture("assets/bird.png")
+	log.info("done loading textures")
 
+	editor_level_polygon = make([dynamic][2]f32, 0, 50)
+
+	log.info("loading level...")
+	active_level = &level_1
+	log.info("done loading level")
+	
 	birds = make(#soa[dynamic]Bird, num_birds)
 	birds_disperse()
-
-	level_polygon = make([dynamic][2]f32, 0, 50)
 }
 
 birds_disperse :: proc() {
 	for &bird in birds {
-		bird.position.x = (rand.float32()*(start_location.width-16))  + start_location.x + 8
-		bird.position.y = (rand.float32()*(start_location.height-16)) + start_location.y + 8
+		bird.position.x = (rand.float32()*(active_level.start_location.width-16))  + active_level.start_location.x + 8
+		bird.position.y = (rand.float32()*(active_level.start_location.height-16)) + active_level.start_location.y + 8
 	}
 }
 
@@ -87,7 +123,7 @@ update :: proc() {
 	#partial switch game_mode {
 		case .PLAY: {
 			dt := rl.GetFrameTime()
-			birds_update(dt)
+			game_update(dt)
 		}
 		case .EDIT: {
 			editor_update()
@@ -98,11 +134,14 @@ update :: proc() {
 	// 
 	rl.BeginDrawing()
 	rl.DrawFPS(0, 0)
-	rl.DrawRectangleRec(start_location, rl.DARKGRAY)
-	rl.DrawRectangleRec(end_location, rl.DARKGREEN)
+	rl.DrawRectangleRec(active_level.start_location, rl.DARKGRAY)
+	for target in active_level.targets {
+		rl.DrawRectangleRec(target.location, rl.DARKGREEN)
+	}
 	#partial switch game_mode {
 		case .PLAY: {
 			rl.ClearBackground({0, 120, 153, 255})
+			draw_level_polygon(active_level.polygon[:])
 			for &bird in birds {
 				bird_dest_rect.x = bird.position.x
 				bird_dest_rect.y = bird.position.y
@@ -110,23 +149,30 @@ update :: proc() {
 				rl.DrawCircleLinesV(rl.GetMousePosition(), config_visible_distance, {128, 128, 128, 255})
 			}
 			if debug_mode {
-				rl.DrawCircleV(birds[0].position, config_protected_distance, {128, 128, 0, 128})
-				rl.DrawCircleV(birds[0].position, config_visible_distance, {0, 128, 128, 128})
+				// if len(birds) > 0 {
+				// 	rl.DrawCircleV(birds[0].position, config_protected_distance, {128, 128, 0, 128})
+				// 	rl.DrawCircleV(birds[0].position, config_visible_distance, {0, 128, 128, 128})
+				// }
 				// log.info(birds[0].velocity)
 			}
+			//
+			// :ui
+			//
+			rl.DrawText(fmt.ctprintf("Wandering Birds: %d", len(birds)), 100, 20, 14, rl.WHITE)
+			// rl.DrawText(fmt.ctprintf("Wandering Birds: %d", len(birds)), 100, 20, 14, rl.WHITE)
 		}
 		case .EDIT: {
 			rl.ClearBackground(rl.BROWN)
 			rl.DrawCircleV(rl.GetMousePosition(), 2, rl.YELLOW)
-			num_level_points := len(level_polygon)
+			num_level_points := len(editor_level_polygon)
 			for i in 0..<num_level_points {
-					rl.DrawCircleV(level_polygon[i], 5, rl.RED)
+					rl.DrawCircleV(editor_level_polygon[i], 5, rl.RED)
 					if num_level_points > 1 {
 					if i == 0 {
-						rl.DrawLineV(level_polygon[i], level_polygon[num_level_points-1], rl.WHITE)
+						rl.DrawLineV(editor_level_polygon[i], editor_level_polygon[num_level_points-1], rl.WHITE)
 						continue
 					}
-					rl.DrawLineV(level_polygon[i], level_polygon[i-1], rl.WHITE)
+					rl.DrawLineV(editor_level_polygon[i], editor_level_polygon[i-1], rl.WHITE)
 				}
 			}
 		}
@@ -137,7 +183,7 @@ update :: proc() {
 	free_all(context.temp_allocator)
 }
 
-birds_update :: proc(dt: f32) {
+game_update :: proc(dt: f32) {
 	num_birds := len(birds)
 	for i in 0..<num_birds {
 		separation_velocity                   : [2]f32
@@ -177,7 +223,7 @@ birds_update :: proc(dt: f32) {
 			}
 		}
 		// mouse tracking
-		if config_mouse_tracking {
+		if config_mouse_tracking && rl.IsMouseButtonDown(.LEFT) {
 			mouse_position := rl.GetMousePosition()
 			distance_to_mouse := linalg.distance(birds[i].position, mouse_position)
 			if distance_to_mouse <= config_visible_distance {
@@ -187,52 +233,79 @@ birds_update :: proc(dt: f32) {
 		// add velocity components
 		birds[i].delta_velocity = separation_velocity + alignment_velocity + cohesion_velocity + mouse_tracking_velocity
 	}
-	for &bird in birds {
-		if bird.delta_velocity == {0, 0} {
+	// birds_to_remove := make([dynamic]int, context.temp_allocator)
+	for i := 0; i < len(birds); {
+	// for &bird, i in birds {
+		if birds[i].delta_velocity == {0, 0} {
 			// drag
-			bird.velocity = rl.Vector2MoveTowards(bird.velocity, {0, 0}, config_drag_factor)
+			birds[i].velocity = rl.Vector2MoveTowards(birds[i].velocity, {0, 0}, config_drag_factor)
 		} else {
-			bird.velocity += bird.delta_velocity
+			birds[i].velocity += birds[i].delta_velocity
 		}
 		// clamp velocity
-		bird_speed := linalg.length(bird.velocity)
-	if bird_speed > config_max_speed {
-			bird.velocity *= config_max_speed / bird_speed
+		birds_speed := linalg.length(birds[i].velocity)
+		if birds_speed > config_max_speed {
+			birds[i].velocity *= config_max_speed / birds_speed
 		}
-		bird.position += bird.velocity * dt
+		birds[i].position += birds[i].velocity * dt
+		// check if birds[i] at target
+		remove := false
+		for target in active_level.targets {
+			if rl.CheckCollisionPointRec(birds[i].position, target.location) {
+				remove = true
+			}
+		}
+		if remove {
+			unordered_remove_soa(&birds, i)
+			continue
+		}
 		// wrap
 		// TODO: remove for actual game
-		if bird.position.x < 0 {
-			bird.position.x = 1280
+		if birds[i].position.x < 0 {
+			birds[i].position.x = 1280
 		}
-		if bird.position.x > 1280 {
-			bird.position.x = 0
+		if birds[i].position.x > 1280 {
+			birds[i].position.x = 0
 		}
-		if bird.position.y < 0 {
-			bird.position.y = 720
+		if birds[i].position.y < 0 {
+			birds[i].position.y = 720
 		}
-		if bird.position.y > 720 {
-			bird.position.y = 0
+		if birds[i].position.y > 720 {
+			birds[i].position.y = 0
 		}
+		i += 1
 	}
 }
 
 editor_update :: proc() {
 	mouse_position := rl.GetMousePosition()
 	if selected_node_index >= 0 {
-		level_polygon[selected_node_index] = mouse_position
+		editor_level_polygon[selected_node_index] = mouse_position
 		if rl.IsMouseButtonPressed(.LEFT) {
 			selected_node_index = -1
 		}
 	} else if rl.IsMouseButtonPressed(.LEFT){
-	// if rl.IsMouseButtonPressed(.LEFT) {
-		for &point, i in level_polygon {
+		for &point, i in editor_level_polygon {
 			if rl.CheckCollisionCircles(mouse_position, 5, point, 5) {
 				selected_node_index = i
 				return
 			}
 		}
-		append(&level_polygon, mouse_position)
+		append(&editor_level_polygon, mouse_position)
+	}
+}
+
+draw_level_polygon :: proc(polygon: [][2]f32) {
+	num_points := len(polygon)
+	for i in 0..<num_points {
+			rl.DrawCircleV(polygon[i], 5, rl.RED)
+			if num_points > 1 {
+			if i == 0 {
+				rl.DrawLineV(polygon[i], polygon[num_points-1], rl.WHITE)
+				continue
+			}
+			rl.DrawLineV(polygon[i], polygon[i-1], rl.WHITE)
+		}
 	}
 }
 
@@ -243,8 +316,10 @@ parent_window_size_changed :: proc(w, h: int) {
 }
 
 shutdown :: proc() {
+	log.info(editor_level_polygon)
 	delete(birds)
-	delete(level_polygon)
+	delete(editor_level_polygon)
+	// delete(level_1.targets)
 	rl.UnloadTexture(bird_texture)
 	rl.CloseWindow()
 }
