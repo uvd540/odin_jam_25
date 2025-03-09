@@ -9,7 +9,8 @@ import "core:math/linalg"
 
 run: bool
 
-camera: rl.Camera2D
+// TODO: Mouse position does not work well with camera
+// camera: rl.Camera2D
 // -- birds --
 num_birds ::  25
 Bird ::       struct {
@@ -25,15 +26,17 @@ bird_dest_rect := rl.Rectangle{0, 0, 16, 16}
 // -- birds --
 
 // -- config --
+config_max_speed :: 100
 config_separation := true
-config_alignment  := false
+config_alignment  := true
 config_cohesion   := false
-config_protected_distance : f32 = 10.0
-config_visible_distance   : f32 = 25.0
+config_mouse_tracking := false
+config_protected_distance : f32 = 20.0
+config_visible_distance   : f32 = 100.0
 config_separation_factor  : f32 = 0.1
 config_alignment_factor   : f32 = 0.01
 config_cohesion_factor    : f32 = 0.01
-config_mouse_tracking_factor :f32 = 0.1
+config_mouse_tracking_factor :f32 = 1
 config_drag_factor        : f32 = 0.1
 // -- config --
 
@@ -48,7 +51,7 @@ init :: proc() {
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
 	rl.InitWindow(1280, 720, "Bird Pathways")
 
-	camera.zoom = 2
+	// camera.zoom = 2
 
 	// Anything in `assets` folder is available to load.
 	bird_texture = rl.LoadTexture("assets/bird.png")
@@ -82,7 +85,7 @@ update :: proc() {
 		if debug_mode {
 			rl.DrawCircleV(birds[0].position, config_protected_distance, {128, 128, 0, 128})
 			rl.DrawCircleV(birds[0].position, config_visible_distance, {0, 128, 128, 128})
-			log.info(birds[0].delta_velocity)
+			log.info(birds[0].velocity)
 		}
 	}
 	// rl.EndMode2D()
@@ -96,9 +99,11 @@ birds_update :: proc(dt: f32) {
 	num_birds := len(birds)
 	for i in 0..<num_birds {
 		separation_velocity: [2]f32
-		alignment_velocity: [2]f32
 		cohesion_velocity: [2]f32
 		mouse_tracking_velocity: [2]f32
+		num_neighbors_visible_range := 0
+		alignment_velocity: [2]f32
+		sum_velocity_visible_range: [2]f32
 		for j in 0..<num_birds {
 			if i == j { continue } // same bird
 			distance := linalg.distance(birds[i].position, birds[j].position)
@@ -106,14 +111,23 @@ birds_update :: proc(dt: f32) {
 			if config_separation && distance <= config_protected_distance {
 				separation_velocity += (birds[i].position - birds[j].position) / distance * config_separation_factor
 			}
+			if distance <= config_visible_distance {
+				num_neighbors_visible_range += 1
+				if config_alignment {
+					sum_velocity_visible_range += birds[j].velocity
+				}
+			}
+		}
+		if num_neighbors_visible_range > 0 {
+			alignment_velocity = sum_velocity_visible_range / f32(num_neighbors_visible_range) * config_alignment_factor
 		}
 		// mouse tracking
-		mouse_position := rl.GetMousePosition()
-		distance_to_mouse := linalg.distance(birds[i].position, mouse_position)
-		log.info(distance_to_mouse)
-		if distance_to_mouse <= config_visible_distance {
-			log.info("tracking mouse")
-			mouse_tracking_velocity = (mouse_position - birds[i].position) / distance_to_mouse * config_mouse_tracking_factor
+		if config_mouse_tracking {
+			mouse_position := rl.GetMousePosition()
+			distance_to_mouse := linalg.distance(birds[i].position, mouse_position)
+			if distance_to_mouse <= config_visible_distance {
+				mouse_tracking_velocity = (mouse_position - birds[i].position) / distance_to_mouse * config_mouse_tracking_factor
+			}
 		}
 		birds[i].delta_velocity = separation_velocity + alignment_velocity + cohesion_velocity + mouse_tracking_velocity
 	}
@@ -124,7 +138,26 @@ birds_update :: proc(dt: f32) {
 		} else {
 			bird.velocity += bird.delta_velocity
 		}
+		// clamp velocity
+		bird_speed := linalg.length(bird.velocity)
+		if bird_speed > config_max_speed {
+			bird.velocity *= config_max_speed / bird_speed
+		}
 		bird.position += bird.velocity * dt
+		// wrap
+		// TODO: remove for actual game
+		if bird.position.x < 0 {
+			bird.position.x = 1280
+		}
+		if bird.position.x > 1280 {
+			bird.position.x = 0
+		}
+		if bird.position.y < 0 {
+			bird.position.y = 720
+		}
+		if bird.position.y > 720 {
+			bird.position.y = 0
+		}
 	}
 }
 
