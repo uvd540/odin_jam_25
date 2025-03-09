@@ -11,8 +11,9 @@ run: bool
 
 // TODO: Mouse position does not work well with camera
 // camera: rl.Camera2D
-// -- birds --
-num_birds ::  25
+
+// :birds
+num_birds ::  100
 Bird ::       struct {
 	position: [2]f32,
 	velocity: [2]f32,
@@ -23,28 +24,25 @@ birds:        #soa[dynamic]Bird
 bird_texture: rl.Texture
 bird_src_rect :: rl.Rectangle{0, 0, 16, 16}
 bird_dest_rect := rl.Rectangle{0, 0, 16, 16}
-// -- birds --
 
-// -- config --
+// :config
 config_max_speed :: 100
 config_separation := true
 config_alignment  := true
-config_cohesion   := false
-config_mouse_tracking := false
+config_cohesion   := true
+config_mouse_tracking := true
 config_protected_distance : f32 = 20.0
 config_visible_distance   : f32 = 100.0
-config_separation_factor  : f32 = 0.1
-config_alignment_factor   : f32 = 0.01
-config_cohesion_factor    : f32 = 0.01
+config_separation_factor  : f32 = 0.01
+config_alignment_factor   : f32 = 0.005
+config_cohesion_factor    : f32 = 0.005
 config_mouse_tracking_factor :f32 = 1
 config_drag_factor        : f32 = 0.1
-// -- config --
 
 debug_mode := true
 
-// -- level --
+// :level
 start_location :: rl.Rectangle{100, 100, 50, 50}
-// -- level --
 
 init :: proc() {
 	run = true
@@ -101,9 +99,10 @@ birds_update :: proc(dt: f32) {
 		separation_velocity: [2]f32
 		cohesion_velocity: [2]f32
 		mouse_tracking_velocity: [2]f32
-		num_neighbors_visible_range := 0
+		num_neighbors_visible_range:f32 = 0
 		alignment_velocity: [2]f32
 		sum_velocity_visible_range: [2]f32
+		sum_mass_times_position_visible_rangle: [2]f32
 		for j in 0..<num_birds {
 			if i == j { continue } // same bird
 			distance := linalg.distance(birds[i].position, birds[j].position)
@@ -113,13 +112,22 @@ birds_update :: proc(dt: f32) {
 			}
 			if distance <= config_visible_distance {
 				num_neighbors_visible_range += 1
+				// alignment
 				if config_alignment {
 					sum_velocity_visible_range += birds[j].velocity
+				}
+				if config_cohesion {
+					sum_mass_times_position_visible_rangle += birds[j].position
 				}
 			}
 		}
 		if num_neighbors_visible_range > 0 {
-			alignment_velocity = sum_velocity_visible_range / f32(num_neighbors_visible_range) * config_alignment_factor
+			if config_alignment {
+				alignment_velocity = sum_velocity_visible_range / num_neighbors_visible_range * config_alignment_factor
+			}
+			if config_cohesion {
+				cohesion_velocity += ((sum_mass_times_position_visible_rangle / num_neighbors_visible_range) - birds[i].position) * config_cohesion_factor
+			}
 		}
 		// mouse tracking
 		if config_mouse_tracking {
@@ -140,7 +148,7 @@ birds_update :: proc(dt: f32) {
 		}
 		// clamp velocity
 		bird_speed := linalg.length(bird.velocity)
-		if bird_speed > config_max_speed {
+	if bird_speed > config_max_speed {
 			bird.velocity *= config_max_speed / bird_speed
 		}
 		bird.position += bird.velocity * dt
