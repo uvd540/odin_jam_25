@@ -3,9 +3,9 @@ package game
 //
 // TODO: Obstacles
 // TODO: Level complete
-// TODO: Give name to each bird
 // TODO: Multiple levels
 // TODO: Rendering improvements
+// TODO: Give name to each bird
 // 
 
 import "core:c"
@@ -46,14 +46,22 @@ config_cohesion := true
 config_mouse_tracking := true
 config_protected_distance: f32 = 20.0
 config_visible_distance: f32 = 100.0
-config_separation_factor: f32 = 0.01
-config_alignment_factor: f32 = 0.005
-config_cohesion_factor: f32 = 0.005
+config_separation_factor: f32 = 0.04
+config_alignment_factor: f32 = 0.002
+config_cohesion_factor: f32 = 0.002
 config_mouse_tracking_factor: f32 = 1
 config_drag_factor: f32 = 0.1
 
-debug_mode := true
+//
+// ;player
+// 
+whistling_factor :: 10
+whistling := false
+current_influence: f32
 
+// 
+// :level
+// 
 Target :: struct {
 	location:        rl.Rectangle,
 	number_required: u8,
@@ -61,10 +69,10 @@ Target :: struct {
 	pct_complete:    f32,
 }
 
-// :level
 Level :: struct {
 	start_location: rl.Rectangle,
 	targets:        []Target,
+	max_influence:  f32,
 	polygon:        [][2]f32,
 }
 
@@ -76,6 +84,7 @@ level_1 := Level {
 		{location = rl.Rectangle{500, 500, 50, 50}, number_required = 20},
 		{location = rl.Rectangle{600, 100, 50, 50}, number_required = 20},
 	},
+	max_influence  = 100,
 	polygon        = {
 		{87, 86},
 		{165, 84},
@@ -124,12 +133,15 @@ init :: proc() {
 	active_level = &level_1
 	log.info("done loading level")
 
-	birds = make(#soa[dynamic]Bird, num_birds)
-	birds_disperse()
+	birds_init()
+	level_reset()
 }
 
-birds_disperse :: proc() {
+birds_init :: proc() {
+	birds = make(#soa[dynamic]Bird, num_birds)
 	for &bird in birds {
+		bird.velocity = {0, 0}
+		bird.delta_velocity = {0, 0}
 		bird.position.x =
 			(rand.float32() * (active_level.start_location.width - 16)) +
 			active_level.start_location.x +
@@ -141,9 +153,17 @@ birds_disperse :: proc() {
 	}
 }
 
+level_reset :: proc() {
+	current_influence = active_level.max_influence
+	for &target in active_level.targets {
+		target.number_current = 0
+		target.pct_complete = 0
+	}
+}
+
 update :: proc() {
 	//
-	// :update
+	// ;update
 	// 
 	if rl.IsKeyPressed(.F2) {
 		#partial switch game_mode {
@@ -156,6 +176,14 @@ update :: proc() {
 	#partial switch game_mode {
 	case .PLAY:
 		{
+			//
+			// ;user-input
+			// 
+			if rl.IsKeyPressed(.R) {
+				birds_init()
+				level_reset()
+			}
+			whistling = rl.IsMouseButtonDown(.LEFT)
 			dt := rl.GetFrameTime()
 			game_update(dt)
 		}
@@ -165,7 +193,7 @@ update :: proc() {
 		}
 	}
 	//
-	// :draw
+	// ;draw
 	// 
 	rl.BeginDrawing()
 	rl.DrawFPS(0, 0)
@@ -186,7 +214,7 @@ update :: proc() {
 	case .PLAY:
 		{
 			rl.ClearBackground({0, 120, 153, 255})
-			draw_level_polygon(active_level.polygon[:])
+			draw_polygon(active_level.polygon[:])
 			for &bird in birds {
 				bird_dest_rect.x = bird.position.x
 				bird_dest_rect.y = bird.position.y
@@ -197,18 +225,17 @@ update :: proc() {
 					{128, 128, 128, 255},
 				)
 			}
-			if debug_mode {
-				// if len(birds) > 0 {
-				// 	rl.DrawCircleV(birds[0].position, config_protected_distance, {128, 128, 0, 128})
-				// 	rl.DrawCircleV(birds[0].position, config_visible_distance, {0, 128, 128, 128})
-				// }
-				// log.info(birds[0].velocity)
-			}
 			//
 			// :ui
 			//
 			rl.DrawText(fmt.ctprintf("Wandering Birds: %d", len(birds)), 100, 20, 14, rl.WHITE)
-			// rl.DrawText(fmt.ctprintf("Wandering Birds: %d", len(birds)), 100, 20, 14, rl.WHITE)
+			// ;ui-influence
+			influence_rec := rl.Rectangle{200, 680, 880, 20}
+			rl.DrawRectangleRoundedLinesEx(influence_rec, 10, 10, 4, rl.WHITE)
+			influence_rec.width *= current_influence / active_level.max_influence
+			log.info("current influence: ", current_influence)
+			log.info("max influence: ", active_level.max_influence)
+			rl.DrawRectangleRounded(influence_rec, 10, 10, rl.GREEN)
 		}
 	case .EDIT:
 		{
@@ -238,6 +265,9 @@ update :: proc() {
 }
 
 game_update :: proc(dt: f32) {
+	if whistling {
+		current_influence -= whistling_factor * dt
+	}
 	num_birds := len(birds)
 	for i in 0 ..< num_birds {
 		separation_velocity: [2]f32
@@ -366,7 +396,7 @@ editor_update :: proc() {
 	}
 }
 
-draw_level_polygon :: proc(polygon: [][2]f32) {
+draw_polygon :: proc(polygon: [][2]f32) {
 	num_points := len(polygon)
 	for i in 0 ..< num_points {
 		rl.DrawCircleV(polygon[i], 5, rl.RED)
