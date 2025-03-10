@@ -10,10 +10,13 @@ package game
 
 import "core:c"
 import "core:fmt"
-import "core:log"
+// import "core:log"
 import "core:math/linalg"
 import "core:math/rand"
 import rl "vendor:raylib"
+
+game_width :: 800
+game_height :: 800
 
 run: bool
 
@@ -34,9 +37,14 @@ Bird :: struct {
 	delta_velocity: [2]f32,
 }
 birds: #soa[dynamic]Bird
-bird_texture: rl.Texture
-bird_src_rect :: rl.Rectangle{0, 0, 16, 16}
 bird_dest_rect := rl.Rectangle{0, 0, 16, 16}
+
+//
+// ;textures
+// 
+spritesheet_texture: rl.Texture
+bird_src_rect :: rl.Rectangle{0, 0, 16, 16}
+music_src_rect :: rl.Rectangle{16, 0, 16, 16}
 
 // :config
 config_max_speed :: 100
@@ -58,6 +66,7 @@ config_drag_factor: f32 = 0.1
 whistling_factor :: 10
 whistling := false
 current_influence: f32
+influence_color: rl.Color
 
 // 
 // :level
@@ -119,19 +128,19 @@ node_radius :: 5
 init :: proc() {
 	run = true
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
-	rl.InitWindow(1280, 720, "Bird Pathways")
+	rl.InitWindow(1280, 720, "Bird Calls")
 
-	log.info("loading textures...")
+	// log.info("loading textures...")
 
 	// Anything in `assets` folder is available to load.
-	bird_texture = rl.LoadTexture("assets/bird.png")
-	log.info("done loading textures")
+	spritesheet_texture = rl.LoadTexture("assets/spritesheet.png")
+	// log.info("done loading textures")
 
 	editor_level_polygon = make([dynamic][2]f32, 0, 50)
 
-	log.info("loading level...")
+	// log.info("loading level...")
 	active_level = &level_1
-	log.info("done loading level")
+	// log.info("done loading level")
 
 	birds_init()
 	level_reset()
@@ -165,6 +174,7 @@ update :: proc() {
 	//
 	// ;update
 	// 
+	mouse_position := rl.GetMousePosition()
 	if rl.IsKeyPressed(.F2) {
 		#partial switch game_mode {
 		case .PLAY:
@@ -185,7 +195,7 @@ update :: proc() {
 			}
 			whistling = rl.IsMouseButtonDown(.LEFT)
 			dt := rl.GetFrameTime()
-			game_update(dt)
+			game_update(mouse_position, dt)
 		}
 	case .EDIT:
 		{
@@ -218,12 +228,36 @@ update :: proc() {
 			for &bird in birds {
 				bird_dest_rect.x = bird.position.x
 				bird_dest_rect.y = bird.position.y
-				rl.DrawTexturePro(bird_texture, bird_src_rect, bird_dest_rect, {8, 8}, 0, rl.WHITE)
+				rl.DrawTexturePro(
+					spritesheet_texture,
+					bird_src_rect,
+					bird_dest_rect,
+					{8, 8},
+					0,
+					rl.WHITE,
+				)
+				influence_color = whistling ? rl.GREEN : rl.GRAY
 				rl.DrawCircleLinesV(
 					rl.GetMousePosition(),
 					config_visible_distance,
-					{128, 128, 128, 255},
+					influence_color,
 				)
+				if whistling {
+					music_dest_rect := rl.Rectangle {
+						mouse_position.x + 16,
+						mouse_position.y - 16,
+						32,
+						32,
+					}
+					rl.DrawTexturePro(
+						spritesheet_texture,
+						music_src_rect,
+						music_dest_rect,
+						{8, 8},
+						0,
+						rl.WHITE,
+					)
+				}
 			}
 			//
 			// :ui
@@ -233,8 +267,8 @@ update :: proc() {
 			influence_rec := rl.Rectangle{200, 680, 880, 20}
 			rl.DrawRectangleRoundedLinesEx(influence_rec, 10, 10, 4, rl.WHITE)
 			influence_rec.width *= current_influence / active_level.max_influence
-			log.info("current influence: ", current_influence)
-			log.info("max influence: ", active_level.max_influence)
+			// log.info("current influence: ", current_influence)
+			// log.info("max influence: ", active_level.max_influence)
 			rl.DrawRectangleRounded(influence_rec, 10, 10, rl.GREEN)
 		}
 	case .EDIT:
@@ -264,7 +298,7 @@ update :: proc() {
 	free_all(context.temp_allocator)
 }
 
-game_update :: proc(dt: f32) {
+game_update :: proc(mouse_position: [2]f32, dt: f32) {
 	if whistling {
 		current_influence -= whistling_factor * dt
 	}
@@ -314,8 +348,7 @@ game_update :: proc(dt: f32) {
 			}
 		}
 		// mouse tracking
-		if config_mouse_tracking && rl.IsMouseButtonDown(.LEFT) {
-			mouse_position := rl.GetMousePosition()
+		if config_mouse_tracking && whistling {
 			distance_to_mouse := linalg.distance(birds[i].position, mouse_position)
 			if distance_to_mouse <= config_visible_distance {
 				mouse_tracking_velocity =
@@ -417,11 +450,11 @@ parent_window_size_changed :: proc(w, h: int) {
 }
 
 shutdown :: proc() {
-	log.info(editor_level_polygon)
+	// log.info(editor_level_polygon)
 	delete(birds)
 	delete(editor_level_polygon)
 	// delete(level_1.targets)
-	rl.UnloadTexture(bird_texture)
+	rl.UnloadTexture(spritesheet_texture)
 	rl.CloseWindow()
 }
 
