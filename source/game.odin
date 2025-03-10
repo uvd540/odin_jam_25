@@ -37,7 +37,6 @@ Bird :: struct {
 	delta_velocity: [2]f32,
 }
 birds: #soa[dynamic]Bird
-bird_dest_rect := rl.Rectangle{0, 0, 16, 16}
 
 //
 // ;textures
@@ -45,6 +44,14 @@ bird_dest_rect := rl.Rectangle{0, 0, 16, 16}
 spritesheet_texture: rl.Texture
 bird_src_rect :: rl.Rectangle{0, 0, 16, 16}
 music_src_rect :: rl.Rectangle{16, 0, 16, 16}
+tree_src_rect :: rl.Rectangle{32, 0, 16, 16}
+cage_src_rect :: rl.Rectangle{48, 0, 16, 16}
+
+bird_dest_rect := rl.Rectangle{0, 0, 16, 16}
+music_dest_rect := rl.Rectangle{0, 0, 32, 32}
+tree_dest_rect := rl.Rectangle{0, 0, 48, 48}
+cage_dest_rect := rl.Rectangle{0, 0, 48, 48}
+
 
 // :config
 config_max_speed :: 100
@@ -88,10 +95,10 @@ Level :: struct {
 active_level: ^Level
 
 level_1 := Level {
-	start_location = rl.Rectangle{100, 100, 50, 50},
+	start_location = rl.Rectangle{100, 100, 48, 48},
 	targets        = []Target {
-		{location = rl.Rectangle{500, 500, 50, 50}, number_required = 20},
-		{location = rl.Rectangle{600, 100, 50, 50}, number_required = 20},
+		{location = rl.Rectangle{500, 500, 48, 48}, number_required = 20},
+		{location = rl.Rectangle{600, 100, 48, 48}, number_required = 20},
 	},
 	max_influence  = 100,
 	polygon        = {
@@ -207,17 +214,21 @@ update :: proc() {
 	// 
 	rl.BeginDrawing()
 	rl.DrawFPS(0, 0)
-	rl.DrawRectangleRec(active_level.start_location, rl.DARKGRAY)
+	cage_dest_rect.x = active_level.start_location.x
+	cage_dest_rect.y = active_level.start_location.y
+	rl.DrawTexturePro(spritesheet_texture, cage_src_rect, cage_dest_rect, {0, 0}, 0, rl.WHITE)
 	for target in active_level.targets {
 		color_g := u8(target.pct_complete * 255)
 		color_r := u8((1 - target.pct_complete) * 128)
-		rl.DrawRectangleRec(target.location, {color_r, color_g, color_r, 255})
+		tree_dest_rect.x = target.location.x
+		tree_dest_rect.y = target.location.y
+		rl.DrawTexturePro(spritesheet_texture, tree_src_rect, tree_dest_rect, {0, 0}, 0, rl.WHITE)
 		rl.DrawText(
 			fmt.ctprintf("%d", target.number_required - target.number_current),
 			i32(target.location.x) + 4,
 			i32(target.location.y) + 4,
 			32,
-			rl.WHITE,
+			{color_r, color_g, 128, 128},
 		)
 	}
 	#partial switch game_mode {
@@ -243,12 +254,8 @@ update :: proc() {
 					influence_color,
 				)
 				if whistling {
-					music_dest_rect := rl.Rectangle {
-						mouse_position.x + 16,
-						mouse_position.y - 16,
-						32,
-						32,
-					}
+					music_dest_rect.x = mouse_position.x
+					music_dest_rect.y = mouse_position.y
 					rl.DrawTexturePro(
 						spritesheet_texture,
 						music_src_rect,
