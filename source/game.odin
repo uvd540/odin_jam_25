@@ -2,6 +2,7 @@ package game
 
 //
 // TODO: Obstacles
+// TODO: Birds are trapped at start
 // TODO: Level complete
 // TODO: Multiple levels
 // TODO: Rendering improvements
@@ -10,13 +11,13 @@ package game
 
 import "core:c"
 import "core:fmt"
-// import "core:log"
+import "core:log"
 import "core:math/linalg"
 import "core:math/rand"
 import rl "vendor:raylib"
 
-game_width :: 800
-game_height :: 800
+game_width :: 1280
+game_height :: 720
 
 run: bool
 
@@ -28,9 +29,9 @@ Game_Mode :: enum {
 }
 
 game_mode := Game_Mode.PLAY
+play_caged := true
 
 // :birds
-num_birds :: 100
 Bird :: struct {
 	position:       [2]f32,
 	velocity:       [2]f32,
@@ -42,18 +43,21 @@ birds: #soa[dynamic]Bird
 // ;textures
 // 
 spritesheet_texture: rl.Texture
+
 bird_src_rect :: rl.Rectangle{0, 0, 16, 16}
 music_src_rect :: rl.Rectangle{16, 0, 16, 16}
 tree_src_rect :: rl.Rectangle{32, 0, 16, 16}
 cage_src_rect :: rl.Rectangle{48, 0, 16, 16}
+smog_src_rect :: rl.Rectangle{64, 0, 16, 16}
+airplane_src_rect :: rl.Rectangle{80, 0, 16, 16}
 
 bird_dest_rect := rl.Rectangle{0, 0, 16, 16}
 music_dest_rect := rl.Rectangle{0, 0, 32, 32}
-tree_dest_rect := rl.Rectangle{0, 0, 48, 48}
 cage_dest_rect := rl.Rectangle{0, 0, 48, 48}
 
-
-// :config
+// 
+// ;config
+// 
 config_max_speed :: 100
 config_separation := true
 config_alignment := true
@@ -72,12 +76,21 @@ config_drag_factor: f32 = 0.1
 // 
 whistling_factor :: 10
 whistling := false
-current_influence: f32
+current_level: u8 = 0
 influence_color: rl.Color
 
 // 
-// :level
+// ;level
 // 
+source: rl.Rectangle
+targets: [dynamic]Target
+obstacles: [dynamic]Obstacle
+influence_start: f32
+influence_current: f32
+smog_timer: Timer
+level_num_birds: u8
+
+
 Target :: struct {
 	location:        rl.Rectangle,
 	number_required: u8,
@@ -85,95 +98,141 @@ Target :: struct {
 	pct_complete:    f32,
 }
 
+ObstacleType :: enum {
+	Smog,
+	Airplane,
+}
+
+Obstacle :: struct {
+	type:             ObstacleType,
+	position:         [2]f32,
+	velocity:         [2]f32,
+	src_rect:         rl.Rectangle,
+	avoidance_factor: f32,
+	scale:            f32,
+}
+
+obstacle_create :: proc(obstacle_type: ObstacleType) -> Obstacle {
+	obstacle: Obstacle
+	obstacle.type = obstacle_type
+	switch obstacle_type {
+	case .Smog:
+		{
+			obstacle.src_rect = smog_src_rect
+			obstacle.avoidance_factor = 0.01
+			obstacle.scale = 3
+		}
+	case .Airplane:
+		{
+			obstacle.src_rect = airplane_src_rect
+			obstacle.avoidance_factor = 0.1
+			obstacle.scale = 4
+		}
+	}
+	return obstacle
+}
+
+obstacle_update :: proc(obstacle: ^Obstacle, dt: f32) {
+	obstacle.position += obstacle.velocity * dt
+	if obstacle.type == .Smog {
+		wrap(&obstacle.position)
+	}
+}
+
+obstacle_draw :: proc(obstacle: Obstacle) {
+	dest_rect := rl.Rectangle {
+		obstacle.position.x,
+		obstacle.position.y,
+		obstacle.scale * 16,
+		obstacle.scale * 16,
+	}
+	rl.DrawTexturePro(spritesheet_texture, obstacle.src_rect, dest_rect, {0, 0}, 0, rl.WHITE)
+}
+
+bounce :: proc(position: [2]f32, velocity: ^[2]f32) {
+	if position.x < 0 {
+		velocity.x *= -1
+	}
+	if position.x > game_width {
+		velocity.x *= -1
+	}
+	if position.y < 0 {
+		velocity.y *= -1
+	}
+	if position.y > game_height {
+		velocity.y *= -1
+	}
+}
+
+wrap :: proc(position: ^[2]f32) {
+	if position.x < 0 {
+		position.x = game_width
+	}
+	if position.x > game_width {
+		position.x = 0
+	}
+	if position.y < 0 {
+		position.y = game_height
+	}
+	if position.y > game_height {
+		position.y = 0
+	}
+}
+
 Level :: struct {
+	num_birds:      u8,
 	start_location: rl.Rectangle,
 	targets:        []Target,
 	max_influence:  f32,
 	polygon:        [][2]f32,
+	smog_timer:     Timer,
+	airplane_timer: Timer,
+	obstacles:      [dynamic]Obstacle,
 }
-
-active_level: ^Level
-
-level_1 := Level {
-	start_location = rl.Rectangle{100, 100, 48, 48},
-	targets        = []Target {
-		{location = rl.Rectangle{500, 500, 48, 48}, number_required = 20},
-		{location = rl.Rectangle{600, 100, 48, 48}, number_required = 20},
-	},
-	max_influence  = 100,
-	polygon        = {
-		{87, 86},
-		{165, 84},
-		{242, 78},
-		{341, 103},
-		{445, 101},
-		{508, 83},
-		{578, 101},
-		{597, 95},
-		{621, 95},
-		{655, 90},
-		{665, 116},
-		{662, 139},
-		{652, 169},
-		{615, 181},
-		{592, 242},
-		{575, 296},
-		{591, 552},
-		{479, 574},
-		{342, 363},
-		{279, 287},
-		{239, 235},
-		{123, 215},
-		{92, 166},
-	},
-}
-
-editor_level_polygon: [dynamic][2]f32
-selected_node_index: int = -1
-node_radius :: 5
 
 init :: proc() {
 	run = true
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
-	rl.InitWindow(1280, 720, "Bird Calls")
+	rl.InitWindow(game_width, game_height, "Bird Calls")
 
-	// log.info("loading textures...")
-
-	// Anything in `assets` folder is available to load.
 	spritesheet_texture = rl.LoadTexture("assets/spritesheet.png")
-	// log.info("done loading textures")
+	birds = make(#soa[dynamic]Bird, 0, 100)
+	obstacles = make([dynamic]Obstacle, 0, 25)
+	targets = make([dynamic]Target, 0, 5)
 
-	editor_level_polygon = make([dynamic][2]f32, 0, 50)
-
-	// log.info("loading level...")
-	active_level = &level_1
-	// log.info("done loading level")
-
-	birds_init()
-	level_reset()
+	level_goto(0)
 }
 
-birds_init :: proc() {
-	birds = make(#soa[dynamic]Bird, num_birds)
-	for &bird in birds {
-		bird.velocity = {0, 0}
-		bird.delta_velocity = {0, 0}
-		bird.position.x =
-			(rand.float32() * (active_level.start_location.width - 16)) +
-			active_level.start_location.x +
-			8
-		bird.position.y =
-			(rand.float32() * (active_level.start_location.height - 16)) +
-			active_level.start_location.y +
-			8
+level_goto :: proc(level_num: u8) {
+	clear(&birds)
+	clear(&obstacles)
+	clear(&targets)
+	switch level_num {
+	case 0:
+		{
+			append(
+				&targets,
+				Target{location = rl.Rectangle{500, 500, 48, 48}, number_required = 20},
+				Target{location = rl.Rectangle{600, 100, 48, 48}, number_required = 20},
+			)
+			source = {50, 50, 48, 48}
+			level_num_birds = 100
+		}
 	}
+	birds_reset()
 }
 
-level_reset :: proc() {
-	current_influence = active_level.max_influence
-	for &target in active_level.targets {
-		target.number_current = 0
-		target.pct_complete = 0
+birds_reset :: proc() {
+	for _ in 0 ..< level_num_birds {
+		bird := Bird {
+			velocity       = {0, 0},
+			delta_velocity = {0, 0},
+			position       = {
+				(rand.float32() * (source.width - 16)) + source.x + 8,
+				(rand.float32() * (source.height - 16)) + source.y + 8,
+			},
+		}
+		append_soa(&birds, bird)
 	}
 }
 
@@ -182,14 +241,6 @@ update :: proc() {
 	// ;update
 	// 
 	mouse_position := rl.GetMousePosition()
-	if rl.IsKeyPressed(.F2) {
-		#partial switch game_mode {
-		case .PLAY:
-			game_mode = .EDIT
-		case .EDIT:
-			game_mode = .PLAY
-		}
-	}
 	#partial switch game_mode {
 	case .PLAY:
 		{
@@ -197,8 +248,7 @@ update :: proc() {
 			// ;user-input
 			// 
 			if rl.IsKeyPressed(.R) {
-				birds_init()
-				level_reset()
+				level_goto(current_level)
 			}
 			whistling = rl.IsMouseButtonDown(.LEFT)
 			dt := rl.GetFrameTime()
@@ -206,7 +256,7 @@ update :: proc() {
 		}
 	case .EDIT:
 		{
-			editor_update()
+			// editor_update()
 		}
 	}
 	//
@@ -214,15 +264,12 @@ update :: proc() {
 	// 
 	rl.BeginDrawing()
 	rl.DrawFPS(0, 0)
-	cage_dest_rect.x = active_level.start_location.x
-	cage_dest_rect.y = active_level.start_location.y
-	rl.DrawTexturePro(spritesheet_texture, cage_src_rect, cage_dest_rect, {0, 0}, 0, rl.WHITE)
-	for target in active_level.targets {
+	rl.DrawTexturePro(spritesheet_texture, cage_src_rect, source, {0, 0}, 0, rl.WHITE)
+	for target in targets {
+		// log.info("drawing target: ", target)
 		color_g := u8(target.pct_complete * 255)
 		color_r := u8((1 - target.pct_complete) * 128)
-		tree_dest_rect.x = target.location.x
-		tree_dest_rect.y = target.location.y
-		rl.DrawTexturePro(spritesheet_texture, tree_src_rect, tree_dest_rect, {0, 0}, 0, rl.WHITE)
+		rl.DrawTexturePro(spritesheet_texture, tree_src_rect, target.location, {0, 0}, 0, rl.WHITE)
 		rl.DrawText(
 			fmt.ctprintf("%d", target.number_required - target.number_current),
 			i32(target.location.x) + 4,
@@ -234,8 +281,18 @@ update :: proc() {
 	#partial switch game_mode {
 	case .PLAY:
 		{
-			rl.ClearBackground({0, 120, 153, 255})
-			draw_polygon(active_level.polygon[:])
+			rl.ClearBackground(rl.SKYBLUE)
+			//
+			// ;draw;ui
+			//
+			rl.DrawText(fmt.ctprintf("Wandering Birds: %d", len(birds)), 100, 20, 14, rl.WHITE)
+			influence_rec := rl.Rectangle{200, 680, 880, 20}
+			rl.DrawRectangleRoundedLinesEx(influence_rec, 10, 10, 4, rl.WHITE)
+			influence_rec.width *= influence_current / influence_start
+			rl.DrawRectangleRounded(influence_rec, 10, 10, rl.GREEN)
+			// 
+			// ;draw;birds
+			// 
 			for &bird in birds {
 				bird_dest_rect.x = bird.position.x
 				bird_dest_rect.y = bird.position.y
@@ -266,37 +323,26 @@ update :: proc() {
 					)
 				}
 			}
-			//
-			// :ui
-			//
-			rl.DrawText(fmt.ctprintf("Wandering Birds: %d", len(birds)), 100, 20, 14, rl.WHITE)
-			// ;ui-influence
-			influence_rec := rl.Rectangle{200, 680, 880, 20}
-			rl.DrawRectangleRoundedLinesEx(influence_rec, 10, 10, 4, rl.WHITE)
-			influence_rec.width *= current_influence / active_level.max_influence
-			// log.info("current influence: ", current_influence)
-			// log.info("max influence: ", active_level.max_influence)
-			rl.DrawRectangleRounded(influence_rec, 10, 10, rl.GREEN)
 		}
 	case .EDIT:
 		{
-			rl.ClearBackground(rl.BROWN)
-			rl.DrawCircleV(rl.GetMousePosition(), 2, rl.YELLOW)
-			num_level_points := len(editor_level_polygon)
-			for i in 0 ..< num_level_points {
-				rl.DrawCircleV(editor_level_polygon[i], 5, rl.RED)
-				if num_level_points > 1 {
-					if i == 0 {
-						rl.DrawLineV(
-							editor_level_polygon[i],
-							editor_level_polygon[num_level_points - 1],
-							rl.WHITE,
-						)
-						continue
-					}
-					rl.DrawLineV(editor_level_polygon[i], editor_level_polygon[i - 1], rl.WHITE)
-				}
-			}
+			// rl.ClearBackground(rl.BROWN)
+			// rl.DrawCircleV(rl.GetMousePosition(), 2, rl.YELLOW)
+			// // num_level_points := len(editor_level_polygon)
+			// for i in 0 ..< num_level_points {
+			// 	rl.DrawCircleV(editor_level_polygon[i], 5, rl.RED)
+			// 	if num_level_points > 1 {
+			// 		if i == 0 {
+			// 			rl.DrawLineV(
+			// 				editor_level_polygon[i],
+			// 				editor_level_polygon[num_level_points - 1],
+			// 				rl.WHITE,
+			// 			)
+			// 			continue
+			// 		}
+			// 		rl.DrawLineV(editor_level_polygon[i], editor_level_polygon[i - 1], rl.WHITE)
+			// 	}
+			// }
 		}
 	}
 	rl.EndDrawing()
@@ -307,7 +353,7 @@ update :: proc() {
 
 game_update :: proc(mouse_position: [2]f32, dt: f32) {
 	if whistling {
-		current_influence -= whistling_factor * dt
+		influence_current -= whistling_factor * dt
 	}
 	num_birds := len(birds)
 	for i in 0 ..< num_birds {
@@ -387,12 +433,12 @@ game_update :: proc(mouse_position: [2]f32, dt: f32) {
 		birds[i].position += birds[i].velocity * dt
 		// check if birds[i] at target
 		remove := false
-		for &target in active_level.targets {
+		for target in targets {
 			if target.pct_complete < 1 {
 				if rl.CheckCollisionPointRec(birds[i].position, target.location) {
-					target.number_current += 1
+					// target.number_current += 1
 					remove = true
-					target.pct_complete = f32(target.number_current) / f32(target.number_required)
+					// target.pct_complete = f32(target.number_current) / f32(target.number_required)
 				}
 			}
 		}
@@ -400,40 +446,10 @@ game_update :: proc(mouse_position: [2]f32, dt: f32) {
 			unordered_remove_soa(&birds, i)
 			continue
 		}
-		// wrap
-		// TODO: remove for actual game
-		if birds[i].position.x < 0 {
-			birds[i].position.x = 1280
-		}
-		if birds[i].position.x > 1280 {
-			birds[i].position.x = 0
-		}
-		if birds[i].position.y < 0 {
-			birds[i].position.y = 720
-		}
-		if birds[i].position.y > 720 {
-			birds[i].position.y = 0
-		}
+		bounce(birds[i].position, &birds[i].velocity)
 		i += 1
 	}
-}
-
-editor_update :: proc() {
-	mouse_position := rl.GetMousePosition()
-	if selected_node_index >= 0 {
-		editor_level_polygon[selected_node_index] = mouse_position
-		if rl.IsMouseButtonPressed(.LEFT) {
-			selected_node_index = -1
-		}
-	} else if rl.IsMouseButtonPressed(.LEFT) {
-		for &point, i in editor_level_polygon {
-			if rl.CheckCollisionCircles(mouse_position, 5, point, 5) {
-				selected_node_index = i
-				return
-			}
-		}
-		append(&editor_level_polygon, mouse_position)
-	}
+	log.info("current targets: ", targets)
 }
 
 draw_polygon :: proc(polygon: [][2]f32) {
@@ -457,10 +473,9 @@ parent_window_size_changed :: proc(w, h: int) {
 }
 
 shutdown :: proc() {
-	// log.info(editor_level_polygon)
 	delete(birds)
-	delete(editor_level_polygon)
-	// delete(level_1.targets)
+	delete(obstacles)
+	delete(targets)
 	rl.UnloadTexture(spritesheet_texture)
 	rl.CloseWindow()
 }
@@ -474,5 +489,17 @@ should_run :: proc() -> bool {
 	}
 
 	return run
+}
+
+level_0 := Level {
+	start_location = rl.Rectangle{100, 100, 48, 48},
+	targets = []Target {
+		{location = rl.Rectangle{500, 500, 48, 48}, number_required = 20},
+		{location = rl.Rectangle{600, 100, 48, 48}, number_required = 20},
+	},
+	max_influence = 100,
+	smog_timer = Timer{repeating = true, duration = 5},
+	airplane_timer = Timer{repeating = false, duration = 100},
+	num_birds = 100,
 }
 
