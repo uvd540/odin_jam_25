@@ -177,17 +177,6 @@ wrap :: proc(position: ^[2]f32) {
 	}
 }
 
-Level :: struct {
-	num_birds:      u8,
-	start_location: rl.Rectangle,
-	targets:        []Target,
-	max_influence:  f32,
-	polygon:        [][2]f32,
-	smog_timer:     Timer,
-	airplane_timer: Timer,
-	obstacles:      [dynamic]Obstacle,
-}
-
 init :: proc() {
 	run = true
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
@@ -215,6 +204,8 @@ level_goto :: proc(level_num: u8) {
 			)
 			source = {50, 50, 48, 48}
 			level_num_birds = 100
+			influence_start = 100
+			influence_current = influence_start
 		}
 	}
 	birds_reset()
@@ -463,17 +454,5 @@ should_run :: proc() -> bool {
 	}
 
 	return run
-}
-
-level_0 := Level {
-	start_location = rl.Rectangle{100, 100, 48, 48},
-	targets = []Target {
-		{location = rl.Rectangle{500, 500, 48, 48}, number_required = 20},
-		{location = rl.Rectangle{600, 100, 48, 48}, number_required = 20},
-	},
-	max_influence = 100,
-	smog_timer = Timer{repeating = true, duration = 5},
-	airplane_timer = Timer{repeating = false, duration = 100},
-	num_birds = 100,
 }
 
