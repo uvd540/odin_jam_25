@@ -23,7 +23,6 @@ run: bool
 
 Game_Mode :: enum {
 	START,
-	EDIT,
 	PLAY,
 	GAMEOVER,
 }
@@ -89,7 +88,6 @@ influence_start: f32
 influence_current: f32
 smog_timer: Timer
 level_num_birds: u8
-
 
 Target :: struct {
 	location:        rl.Rectangle,
@@ -254,10 +252,6 @@ update :: proc() {
 			dt := rl.GetFrameTime()
 			game_update(mouse_position, dt)
 		}
-	case .EDIT:
-		{
-			// editor_update()
-		}
 	}
 	//
 	// ;draw
@@ -323,26 +317,6 @@ update :: proc() {
 					)
 				}
 			}
-		}
-	case .EDIT:
-		{
-			// rl.ClearBackground(rl.BROWN)
-			// rl.DrawCircleV(rl.GetMousePosition(), 2, rl.YELLOW)
-			// // num_level_points := len(editor_level_polygon)
-			// for i in 0 ..< num_level_points {
-			// 	rl.DrawCircleV(editor_level_polygon[i], 5, rl.RED)
-			// 	if num_level_points > 1 {
-			// 		if i == 0 {
-			// 			rl.DrawLineV(
-			// 				editor_level_polygon[i],
-			// 				editor_level_polygon[num_level_points - 1],
-			// 				rl.WHITE,
-			// 			)
-			// 			continue
-			// 		}
-			// 		rl.DrawLineV(editor_level_polygon[i], editor_level_polygon[i - 1], rl.WHITE)
-			// 	}
-			// }
 		}
 	}
 	rl.EndDrawing()
@@ -431,14 +405,14 @@ game_update :: proc(mouse_position: [2]f32, dt: f32) {
 			birds[i].velocity *= config_max_speed / birds_speed
 		}
 		birds[i].position += birds[i].velocity * dt
-		// check if birds[i] at target
+		// check collisions with target
 		remove := false
-		for target in targets {
+		for &target in targets {
 			if target.pct_complete < 1 {
 				if rl.CheckCollisionPointRec(birds[i].position, target.location) {
-					// target.number_current += 1
+					target.number_current += 1
 					remove = true
-					// target.pct_complete = f32(target.number_current) / f32(target.number_required)
+					target.pct_complete = f32(target.number_current) / f32(target.number_required)
 				}
 			}
 		}
